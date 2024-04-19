@@ -135,7 +135,7 @@ def evaluate_indoor_dataset(data, dataset, metric='euc', cross_view_gallery=Fals
     label = np.array(label)
     view = np.array(view)
 
-    if dataset not in ('CASIA-B', 'OUMVLP', 'CASIA-E', 'SUSTech1K'):
+    if dataset not in ('CASIA-B', 'OUMVLP', 'CASIA-E', 'SUSTech1K','Gait3D'):
         raise KeyError("DataSet %s hasn't been supported !" % dataset)
     if cross_view_gallery:
         return cross_view_gallery_evaluation(
@@ -260,7 +260,7 @@ def evaluate_Gait3D(data, dataset, metric='euc'):
     features, labels, cams, time_seqs = data['embeddings'], data['labels'], data['types'], data['views']
     import json
     probe_sets = json.load(
-        open('./datasets/Gait3D/Gait3D.json', 'rb'))['PROBE_SET']
+        open('./datasets/MSGG/Gait3D_Train1.json', 'rb'))['PROBE_SET']
     probe_mask = []
     for id, ty, sq in zip(labels, cams, time_seqs):
         if '-'.join([id, ty, sq]) in probe_sets:

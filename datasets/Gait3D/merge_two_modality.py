@@ -23,11 +23,15 @@ def merge(sils_path, smpls_path, output_path, link):
                         smpls_path, _id, _type, _view, _seq)
                     output_seq_path = os.path.join(output_path, _id, _type, _view)
                     os.makedirs(output_seq_path, exist_ok=True)
+                    # link_method(sils_seq_path, os.path.join(
+                    #     output_seq_path, "sils-"+_seq))
                     link_method(sils_seq_path, os.path.join(
-                        output_seq_path, "sils-"+_seq))
-                    link_method(smpls_seq_path, os.path.join(
-                        output_seq_path, "smpls-"+_seq))
+                        output_seq_path, "parsing-" + _seq))
 
+                    # link_method(smpls_seq_path, os.path.join(
+                    #     output_seq_path, "smpls-"+_seq))
+                    link_method(smpls_seq_path, os.path.join(
+                        output_seq_path, "skes-" + _seq))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Gait3D dataset mergence.')

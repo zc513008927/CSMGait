@@ -26,11 +26,13 @@ class BaseSilTransform():
 
 
 class BaseParsingCuttingTransform():
+
     def __init__(self, divsor=255.0, cutting=None):
         self.divsor = divsor
         self.cutting = cutting
 
     def __call__(self, x):
+        # print("*************")
         if self.cutting is not None:
             cutting = self.cutting
         else:
@@ -577,14 +579,19 @@ class TwoView(object):
 
 
 class MSGGTransform():
-    def __init__(self, joint_format="coco"):
+    def __init__(self, joint_format="modified"):
         if joint_format == "coco": #17
             self.mask=[6,8,14,12,7,13,5,10,16,11,9,15]
         elif joint_format in ['alphapose', 'openpose']: #18
             self.mask=[2,3,9,8,6,12,5,4,10,11,7,13]
+        elif joint_format== "modified": #12
+            self.mask=[0,1,2,3,4,5,6,7,8,9,10,11]
+            pass
         else:
             raise ValueError("Invalid joint_format.")
         
     def __call__(self, x):
+        # print("$$$$$$$$$")
+        # print("*6666666666666666666666   ",self.mask)
         result=x[...,self.mask,:].copy()
         return result

@@ -100,6 +100,9 @@ class SeparateFCs(nn.Module):
             out: [n, c_out, p]
         """
         x = x.permute(2, 0, 1).contiguous()
+        # print("SSSSSSSSSS  ",x.size(),self.fc_bin.size())
+        # SSSSSSSSSS   torch.Size([21, 32, 512]) torch.Size([21, 512, 256])
+        # SSSSSSSSSS   torch.Size([5, 32, 640]) torch.Size([21, 512, 256])
         if self.norm:
             out = x.matmul(F.normalize(self.fc_bin, dim=1))
         else:
@@ -119,6 +122,7 @@ class SeparateBNNecks(nn.Module):
         self.p = parts_num
         self.class_num = class_num
         self.norm = norm
+        # [5,256,3000]
         self.fc_bin = nn.Parameter(
             nn.init.xavier_uniform_(
                 torch.zeros(parts_num, in_channels, class_num)))
@@ -135,6 +139,7 @@ class SeparateBNNecks(nn.Module):
         if self.parallel_BN1d:
             n, c, p = x.size()
             x = x.view(n, -1)  # [n, c*p]
+            # print("************##########",x.size())
             x = self.bn1d(x)
             x = x.view(n, c, p)
         else:
@@ -143,6 +148,8 @@ class SeparateBNNecks(nn.Module):
         feature = x.permute(2, 0, 1).contiguous()
         if self.norm:
             feature = F.normalize(feature, dim=-1)  # [p, n, c]
+            # print("feature",feature.size())
+            # feature torch.Size([5, 32, 256])
             logits = feature.matmul(F.normalize(
                 self.fc_bin, dim=1))  # [p, n, c]
         else:

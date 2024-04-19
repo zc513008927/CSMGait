@@ -3,16 +3,68 @@ import copy
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
 from ..base_model import BaseModel
+from ..modules import SetBlockWrapper, HorizontalPoolingPyramid, PackSequenceWrapper, SeparateFCs, SeparateBNNecks
+from ..backbones.gcn import GCN
+def L_Matrix(adj_npy, adj_size):
+    D = np.zeros((adj_size, adj_size))
+    for i in range(adj_size):
+        tmp = adj_npy[i, :]
+        count = np.sum(tmp == 1)
+        if count > 0:
+            number = count ** (-1 / 2)
+            D[i, i] = number
 
-class MultiScaleGaitGraph(BaseModel):
-    """
-        Learning Rich Features for Gait Recognition by Integrating Skeletons and Silhouettes
-        Github: https://github.com/YunjiePeng/BimodalFusion
-    """
+    x = np.matmul(D, adj_npy)
+    L = np.matmul(x, D)
+    return L
 
-    def build_network(self, model_cfg):
+
+def get_fine_adj_npy():
+    fine_adj_list = [
+        # 1  2  3  4  5  6  7  8  9  10 11
+        [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1],  # 1
+        [1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0],  # 2
+        [0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1],  # 3
+        [0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1],  # 4
+        [0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0],  # 5
+        [0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],  # 6
+        [0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1],  # 7
+        [0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1],  # 8
+        [0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0],  # 9
+        [0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],  # 10
+        [1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]  # 11
+    ]
+    fine_adj_npy = np.array(fine_adj_list)
+    fine_adj_npy = L_Matrix(fine_adj_npy, len(fine_adj_npy))  # len返回的是行数
+    return fine_adj_npy
+
+
+def get_coarse_adj_npy():
+    coarse_adj_list = [
+        # 1  2  3  4  5
+        [1, 1, 1, 1, 1],  # 1
+        [1, 1, 0, 0, 0],  # 2
+        [1, 0, 1, 0, 0],  # 3
+        [1, 0, 0, 1, 0],  # 4
+        [1, 0, 0, 0, 1]  # 5
+    ]
+    coarse_adj_npy = np.array(coarse_adj_list)
+    coarse_adj_npy = L_Matrix(coarse_adj_npy, len(coarse_adj_npy))  # len返回的是行数
+    return coarse_adj_npy
+
+
+class Msgg_ParsingGait(BaseModel):
+    def __init__(self, cfgs, training):
+        super().__init__(cfgs, training)
+        # self.y_sp_output = None
+
+    def semantic_pooling(self, x):
+        cur_node_num = x.size()[-1]
+        half_x_1, half_x_2 = torch.split(x, int(cur_node_num / 2), dim=-1)
+        x_sp = torch.add(half_x_1, half_x_2) / 2
+        return x_sp
+    def build_network_Msgg(self, model_cfg):
         in_c = model_cfg['in_channels']
         out_c = model_cfg['out_channels']
         num_id = model_cfg['num_id']
@@ -66,17 +118,178 @@ class MultiScaleGaitGraph(BaseModel):
         self.fc = nn.Linear(in_c[-1], out_c)
         self.bn_neck = nn.BatchNorm1d(out_c)
         self.encoder_cls = nn.Linear(out_c, num_id, bias=False)
+    def build_network(self, model_cfg):
+        self.Backbone = self.get_backbone(model_cfg['backbone_cfg'])
+        self.Backbone = SetBlockWrapper(self.Backbone)
+        self.FCs = SeparateFCs(**model_cfg['SeparateFCs'])
+        self.BNNecks = SeparateBNNecks(**model_cfg['SeparateBNNecks'])
+        self.TP = PackSequenceWrapper(torch.max)
+        self.HPP = HorizontalPoolingPyramid(bin_num=model_cfg['bin_num'])
 
-    def semantic_pooling(self, x):
-        cur_node_num = x.size()[-1]
-        half_x_1, half_x_2 = torch.split(x, int(cur_node_num / 2), dim=-1)
-        x_sp = torch.add(half_x_1, half_x_2) / 2
-        return x_sp
+        nfeat = model_cfg['GCN']['in_channels']
+        nfeat_new= model_cfg['SeparateFCs']['in_channels']
+        gcn_cfg = model_cfg['gcn_cfg']
+        self.fine_parts = gcn_cfg['fine_parts']
+        coarse_parts = gcn_cfg['coarse_parts']
 
-    def forward(self, inputs):
+        self.only_fine_graph = gcn_cfg['only_fine_graph']
+        self.only_coarse_graph = gcn_cfg['only_coarse_graph']
+        self.combine_fine_coarse_graph = gcn_cfg['combine_fine_coarse_graph']
+
+        if self.only_fine_graph:
+            fine_adj_npy = get_fine_adj_npy()
+            self.fine_adj_npy = torch.from_numpy(fine_adj_npy).float()
+            self.gcn_fine = GCN(self.fine_parts, nfeat, nfeat, isMeanPooling=True)
+            self.gammas_fine = torch.nn.Parameter(torch.ones(self.fine_parts) * 0.75)
+        elif self.only_coarse_graph:
+            coarse_adj_npy = get_coarse_adj_npy()
+            self.coarse_adj_npy = torch.from_numpy(coarse_adj_npy).float()
+            self.gcn_coarse = GCN(coarse_parts, nfeat, nfeat, isMeanPooling=True)
+            self.gcn_coarse_new = GCN(coarse_parts, nfeat_new, nfeat_new, isMeanPooling=True)
+            self.gammas_coarse = torch.nn.Parameter(torch.ones(coarse_parts) * 0.75)
+        elif self.combine_fine_coarse_graph:
+            fine_adj_npy = get_fine_adj_npy()
+            self.fine_adj_npy = torch.from_numpy(fine_adj_npy).float()
+            self.gcn_fine = GCN(self.fine_parts, nfeat, nfeat, isMeanPooling=True)
+            self.gammas_fine = torch.nn.Parameter(torch.ones(self.fine_parts) * 0.75)
+            coarse_adj_npy = get_coarse_adj_npy()
+            self.coarse_adj_npy = torch.from_numpy(coarse_adj_npy).float()
+            self.gcn_coarse = GCN(coarse_parts, nfeat, nfeat, isMeanPooling=True)
+            self.gammas_coarse = torch.nn.Parameter(torch.ones(coarse_parts) * 0.75)
+        else:
+            raise ValueError("You should choose fine/coarse graph, or combine both of them.")
+        # msgg模块build
+        self.build_network_Msgg(model_cfg)
+
+    def PPforGCN(self, x):
+        """
+            Part Pooling for GCN
+            x   : [n, p, c, h, w]
+            ret : [n, p, c]
+        """
+        n, p, c, h, w = x.size()
+        z = x.view(n, p, c, -1)  # [n, p, c, h*w]
+        z = z.mean(-1) + z.max(-1)[0]  # [n, p, c]
+        return z
+
+    def ParsPartforFineGraph(self, mask_resize, z):
+        """
+            x: [n, c, s, h, w]
+            paes: [n, 1, s, H, W]
+            return [n*s, 11, c, h, w]
+            ***Fine Parts:
+            # 0: Background,
+            1: Head,
+            2: Torso,
+            3: Left-arm,
+            4: Right-arm,
+            5: Left-hand,
+            6: Right-hand,
+            7: Left-leg,
+            8: Right-leg,
+            9: Left-foot,
+            10: Right-foot,
+            11: Dress
+        """
+        fine_mask_list = list()
+        for i in range(1, self.fine_parts + 1):
+            fine_mask_list.append((mask_resize.long() == i))  # split mask of each class
+
+        fine_z_list = list()
+        for i in range(len(fine_mask_list)):
+            mask = fine_mask_list[i].unsqueeze(1)
+            fine_z_list.append(
+                (mask.float() * z * self.gammas_fine[i] + (~mask).float() * z * (1.0 - self.gammas_fine[i])).unsqueeze(
+                    1))  # split feature map by mask of each class
+        fine_z_feat = torch.cat(fine_z_list, dim=1)  # [n*s, 11, c, h, w] or [n*s, 5, c, h, w]
+
+        return fine_z_feat
+
+    def ParsPartforCoarseGraph(self, mask_resize, z):
+        """
+            x: [n, c, s, h, w]
+            paes: [n, 1, s, H, W]
+            return [n*s, 5, c, h, w]
+            ***Coarse Parts:
+            1: [1, 2, 11]  Head, Torso, Dress
+            2: [3, 5]  Left-arm, Left-hand
+            3: [4, 6]  Right-arm, Right-hand
+            4: [7, 9]  Left-leg, Left-foot
+            5: [8, 10] Right-leg, Right-foot
+        """
+        coarse_mask_list = list()
+        coarse_parts = [[1, 2, 11], [3, 5], [4, 6], [7, 9], [8, 10]]
+        for coarse_part in coarse_parts:
+            # 这里获取背景部分
+            part = mask_resize.long() == -1
+            for i in coarse_part:
+                # 把各个label进行相加， 组成一个mask
+                part += (mask_resize.long() == i)
+            coarse_mask_list.append(part)
+
+        coarse_z_list = list()
+        for i in range(len(coarse_mask_list)):
+            # 这里把原来mask 维度 nxs,h,w变成nxs,1,h,w
+            mask = coarse_mask_list[i].unsqueeze(1)
+            # 这里z是nxs,c,h,w，  要进行mask就需要对每个feature的所有通道进行相同的mask，所以是1个mask对应一个c通道
+            coarse_z_list.append((mask.float() * z * self.gammas_coarse[i] + (~mask).float() * z * (
+                        1.0 - self.gammas_coarse[i])).unsqueeze(1))  # split feature map by mask of each class
+
+        coarse_z_feat = torch.cat(coarse_z_list, dim=1)  # [n*s, 11, c, h, w] or [n*s, 5, c, h, w]
+
+        return coarse_z_feat
+
+    def ParsPartforGCN(self, x, pars):
+        """
+            x: [n, c, s, h, w]  output by CNN
+            pars: [n, 1, s, H, W]:input parsing
+            return [n*s, 11, c, h, w] or [n*s, 5, c, h, w]
+        """
+        n, c, s, h, w = x.size()
+        # mask_resize: [n, s, h, w]
+        mask_resize = F.interpolate(input=pars.squeeze(1), size=(h, w), mode='nearest')
+        mask_resize = mask_resize.view(n * s, h, w)
+
+        z = x.transpose(1, 2).reshape(n * s, c, h, w)
+
+        if self.only_fine_graph:
+            fine_z_feat = self.ParsPartforFineGraph(mask_resize, z)
+            return fine_z_feat, None
+        elif self.only_coarse_graph:
+            coarse_z_feat = self.ParsPartforCoarseGraph(mask_resize, z)
+            return None, coarse_z_feat
+        elif self.combine_fine_coarse_graph:
+            fine_z_feat = self.ParsPartforFineGraph(mask_resize, z)
+            coarse_z_feat = self.ParsPartforCoarseGraph(mask_resize, z)
+            return fine_z_feat, coarse_z_feat
+        else:
+            raise ValueError("You should choose fine/coarse graph, or combine both of them.")
+
+    def get_gcn_feat(self, n, input, adj_np, is_cuda, seqL):
+        input_ps = self.PPforGCN(input)  # [n*s, 11, c]
+        n_s, p, c = input_ps.size()
+        # print("GHGHGH  ",input_ps.size())
+        if is_cuda:
+            adj = adj_np.cuda()
+        adj = adj.repeat(n_s, 1, 1)
+        if p == 11:
+            output_ps = self.gcn_fine(input_ps, adj)  # [n*s, 11, c]
+        elif p == 5:
+            output_ps = self.gcn_coarse(input_ps, adj)  # [n*s, 5, c]
+        else:
+            raise ValueError(f"The parsing parts should be 11 or 5, but got {p}")
+        # output_ps = output_ps.view(n, n_s // n, p, c)  # [n, s, ps, c]
+        # 这里暂时不进行序列的时间池化
+        # output_ps = self.TP(output_ps, seqL, dim=1, options={"dim": 1})[0]  # [n, ps, c]
+
+        return output_ps
+
+    def forward_msgg(self, inputs):
         ipts, labs, _, _, seqL = inputs
-        
-        x = ipts[0]  # [N, T, V, C]
+
+        # x = ipts[0]  # [N, T, V, C]
+        # 获取骨骼数据
+        x=ipts[1]
         del ipts
         """
            N - the number of videos.
@@ -87,10 +300,14 @@ class MultiScaleGaitGraph(BaseModel):
         N, T, V, C = x.size()
         x = x.permute(0, 3, 1, 2).contiguous()
         x = x.view(N, C, T, V)
-
+        # print("****************",x.size())
         y = self.semantic_pooling(x)
+        # print("((((((((((((((",y.size())
         z = self.semantic_pooling(y)
-        for gcn_lowSemantic, importance_lowSemantic, gcn_mediumSemantic, importance_mediumSemantic, gcn_highSemantic, importance_highSemantic in zip(self.st_gcn_networks_lowSemantic, self.edge_importance_lowSemantic, self.st_gcn_networks_mediumSemantic, self.edge_importance_mediumSemantic, self.st_gcn_networks_highSemantic, self.edge_importance_highSemantic):
+        for gcn_lowSemantic, importance_lowSemantic, gcn_mediumSemantic, importance_mediumSemantic, gcn_highSemantic, importance_highSemantic in zip(
+                self.st_gcn_networks_lowSemantic, self.edge_importance_lowSemantic, self.st_gcn_networks_mediumSemantic,
+                self.edge_importance_mediumSemantic, self.st_gcn_networks_highSemantic,
+                self.edge_importance_highSemantic):
             x, _ = gcn_lowSemantic(x, self.A_lowSemantic * importance_lowSemantic)
             y, _ = gcn_mediumSemantic(y, self.A_mediumSemantic * importance_mediumSemantic)
             z, _ = gcn_highSemantic(z, self.A_highSemantic * importance_highSemantic)
@@ -100,41 +317,148 @@ class MultiScaleGaitGraph(BaseModel):
             y = torch.add(y, x_sp)
             y_sp = self.semantic_pooling(y)
             z = torch.add(z, y_sp)
-        
+        # print("$$$$$$$$$$$$$",y.size())
+        # self.y_sp_output = y
         # global pooling for each layer
         x_sp = F.avg_pool2d(x, x.size()[2:])
         N, C, T, V = x_sp.size()
-        x_sp = x_sp.view(N, C, T*V).contiguous()
-
+        x_sp = x_sp.view(N, C, T * V).contiguous()
+        # self.x_sp=x_sp
         y_sp = F.avg_pool2d(y, y.size()[2:])
         N, C, T, V = y_sp.size()
-        y_sp = y_sp.view(N, C, T*V).contiguous()
-
+        y_sp = y_sp.view(N, C, T * V).contiguous()
+        # self.y_sp=y_sp
         z = F.avg_pool2d(z, z.size()[2:])
         N, C, T, V = z.size()
         z = z.permute(0, 2, 3, 1).contiguous()
-        z = z.view(N, T*V, C)
+        z = z.view(N, T * V, C)
 
         z_fc = self.fc(z.view(N, -1))
-        bn_z_fc = self.bn_neck(z_fc)
-        z_cls_score = self.encoder_cls(bn_z_fc)
+        # bn_z_fc = self.bn_neck(z_fc)
+        # z_cls_score = self.encoder_cls(bn_z_fc)
 
-        z_fc = z_fc.unsqueeze(-1).contiguous() # [n, c, p]
-        z_cls_score = z_cls_score.unsqueeze(-1).contiguous() # [n, c, p]
+        z_fc = z_fc.unsqueeze(-1).contiguous()  # [n, c, p]
+        # self.z_fc=z_fc
+        # z_cls_score = z_cls_score.unsqueeze(-1).contiguous()  # [n, c, p]
+        return y, x_sp, y_sp, z_fc
+        # retval = {
+        #     'training_feat': {
+        #         'triplet_joints': {'embeddings': x_sp, 'labels': labs},
+        #         'triplet_limbs': {'embeddings': y_sp, 'labels': labs},
+        #         'triplet_bodyparts': {'embeddings': z_fc, 'labels': labs},
+        #         'softmax': {'logits': z_cls_score, 'labels': labs}
+        #     },
+        #     'visual_summary': {},
+        #     'inference_feat': {
+        #         'embeddings': z_fc
+        #     }
+        # }
+    def forward(self, inputs):
+        ipts, labs, _, _, seqL = inputs
 
+        pars = ipts[0]
+        # print("))))))))))))) ",ipts[0].size(),ipts[1].size())
+        # 增加骨骼数据
+        if len(pars.size()) == 4:
+            pars = pars.unsqueeze(1)
+
+        del ipts
+        outs = self.Backbone(pars)  # [n, c, s, h, w]
+
+        outs_n, outs_c, outs_s, outs_h, outs_w = outs.size()
+
+        # split features by parsing classes
+        # outs_ps_fine: [n*s, 11, c, h, w]
+        # outs_ps_coarse: [n*s, 5, c, h, w]
+        outs_ps_fine, outs_ps_coarse = self.ParsPartforGCN(outs, pars)
+
+        is_cuda = pars.is_cuda
+        if self.only_fine_graph:
+            outs_ps = self.get_gcn_feat(outs_n, outs_ps_fine, self.fine_adj_npy, is_cuda, seqL)  # [n, 11, c]
+        elif self.only_coarse_graph:
+            # 进行空间卷积和时间池化
+            # 这里[n*s, ps, c]
+            outs_ps = self.get_gcn_feat(outs_n, outs_ps_coarse, self.coarse_adj_npy, is_cuda, seqL)  # [n, 5, c]
+        elif self.combine_fine_coarse_graph:
+            outs_fine = self.get_gcn_feat(outs_n, outs_ps_fine, self.fine_adj_npy, is_cuda, seqL)  # [n, 11, c]
+            outs_coarse = self.get_gcn_feat(outs_n, outs_ps_coarse, self.coarse_adj_npy, is_cuda, seqL)  # [n, 5, c]
+            outs_ps = torch.cat([outs_fine, outs_coarse], 1)  # [n, 16, c]
+        else:
+            raise ValueError("You should choose fine/coarse graph, or combine both of them.")
+        # outs_ps = outs_ps.transpose(1, 2).contiguous()  # [n, c, ps]
+
+        # Temporal Pooling, TP
+        # outs = self.TP(outs, seqL, options={"dim": 2})[0]  # [n, c, h, w]
+        # Horizontal Pooling Matching, HPM
+        # feat = self.HPP(outs)  # [n, c, p ]
+        # 调用msgg模块
+        y, x_sp, y_sp, z_fc=self.forward_msgg(inputs)
+        # Concatenate the features
+        # y_sp(N, C, T, V)
+        # outs_ps [n, t, v, c]
+        # 这里保证两者的维度是一样的
+        y_sp_output=y.permute(0, 2, 3, 1).contiguous()
+        # 32,30,6,128
+        n, t, v, c = y_sp_output.size()
+        y_sp_output=y_sp_output.view(n*t, v, c)
+        # print("^^^^^^^^^",y_sp_output.size())
+        # [0,4,1,5,2]
+        # [0-shoulder,1-right_elbow_wrist,2-right_knee_ankle,3-right_left_hip,4-left_elbow_wrist,5-left_knee_ankle]
+        #   1: [1, 2, 11]  Head, Torso, Dress
+        #             2: [3, 5]  Left-arm, Left-hand
+        #             3: [4, 6]  Right-arm, Right-hand
+        #             4: [7, 9]  Left-leg, Left-foot
+        #             5: [8, 10] Right-leg, Right-foot
+        # 对应关系，
+        # y_sp_output 的节点数进行减少，把0和3节点合并取平均值
+        avg_node= torch.mean(y_sp_output[:, [0, 3], :], dim=1)
+        # new_v_order = torch.tensor([1, 2, 3, 4])
+        rank = torch.distributed.get_rank()
+        Y = torch.zeros(y_sp_output.size(0), y_sp_output.size(1) - 1, y_sp_output.size(2)).half().to(f"cuda:{rank}")
+
+        # 这里按照 [0,4,1,5,2]进行节点顺序重新排列
+        # print("**************",Y.size(),y_sp_output.size())
+        Y[:, [1, 2, 3, 4], :] = y_sp_output[:,[4, 1, 5, 2], :]
+        Y[:, 0, :] = avg_node
+        feat_msgg_parsinggait = torch.cat([Y, outs_ps], dim=-1)  # [n*s,v-1,c+C]
+        # 进行GCN操作
+        n_s,v,c = feat_msgg_parsinggait.size()
+        if is_cuda:
+            adj = self.coarse_adj_npy.cuda()
+        adj = adj.repeat(n_s, 1, 1)
+        # print("***********",feat_msgg_parsinggait.size(),adj.size())
+        output_ps = self.gcn_coarse_new(feat_msgg_parsinggait, adj)  # [n*s, 5, c+C]
+        output_ps = output_ps.view(outs_n, n_s // outs_n, v, -1)  # [n, s, ps, c]
+        # 进行时间池化
+        output_ps = self.TP(output_ps, seqL, dim=1, options={"dim": 1})[0]  # [n, ps, c]
+        # 【32,5,640】
+        output_ps=output_ps.transpose(1, 2).contiguous()   # [n, c, ps]
+        # feat = torch.cat([feat, outs_ps], dim=-1)  # [n, c, p+ps]
+        # embed_1 = self.FCs(feat)  # [n, c, p+ps]
+        embed_1 = self.FCs(output_ps)  # [n, c+C, p]
+        embed_2, logits = self.BNNecks(embed_1)  # [n, c+C, ps]
+        embed = embed_1
+
+        n, _, s, h, w = pars.size()
         retval = {
             'training_feat': {
                 'triplet_joints': {'embeddings': x_sp, 'labels': labs},
                 'triplet_limbs': {'embeddings': y_sp, 'labels': labs},
                 'triplet_bodyparts': {'embeddings': z_fc, 'labels': labs},
-                'softmax': {'logits': z_cls_score, 'labels': labs}
+                'triplet': {'embeddings': embed_1, 'labels': labs},
+                'softmax': {'logits': logits, 'labels': labs}
             },
-            'visual_summary': {},
+            'visual_summary': {
+                'image/pars': pars.view(n * s, 1, h, w)
+            },
             'inference_feat': {
-                'embeddings': z_fc
+                'embeddings': embed
             }
         }
         return retval
+
+
+
 
 class st_gcn_block(nn.Module):
     r"""Applies a spatial temporal graph convolution over an input graph sequence.

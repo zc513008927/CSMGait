@@ -45,6 +45,7 @@ class GraphConvolution(nn.Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input, adj):
+        # print("((((()00",input.size(),adj.size())
         support = torch.matmul(input, self.weight)
         output_ = torch.bmm(adj, support)
         if self.bias is not None:
@@ -72,7 +73,10 @@ class GCN(nn.Module):
         self.gc2 = GraphConvolution(nhid, nhid, adj_size)
 
     def forward(self, x, adj):
-        x_ = F.dropout(x, 0.5, training=self.training) 
+        # print("$$$$$$$$$$$$",x.size(),adj.size())
+        x_ = F.dropout(x, 0.5, training=self.training)
+
+        # print("$$$$$$$$$$$$", x.size(), adj.size())
         x_ = F.relu(self.gc1(x_, adj))
         x_ = F.dropout(x_, 0.5, training=self.training)
         x_ = F.relu(self.gc2(x_, adj))

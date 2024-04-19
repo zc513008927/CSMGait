@@ -44,6 +44,7 @@ class DataSet(tordata.Dataset):
             data_list.append(_)
         for idx, data in enumerate(data_list):
             if len(data) != len(data_list[0]):
+                print("&&&&&&&&",len(data),len(data_list[0]))
                 raise ValueError(
                     'Each input data({}) should have the same length.'.format(paths[idx]))
             if len(data) == 0:
@@ -67,6 +68,7 @@ class DataSet(tordata.Dataset):
             self.__getitem__(idx)
 
     def __dataset_parser(self, data_config, training):
+        # print("**********************")
         dataset_root = data_config['dataset_root']
         try:
             data_in_use = data_config['data_in_use']  # [n], true or false
@@ -78,6 +80,7 @@ class DataSet(tordata.Dataset):
         train_set = partition["TRAIN_SET"]
         test_set = partition["TEST_SET"]
         label_list = os.listdir(dataset_root)
+        # print("************",label_list)
         train_set = [label for label in train_set if label in label_list]
         test_set = [label for label in test_set if label in label_list]
         miss_pids = [label for label in label_list if label not in (

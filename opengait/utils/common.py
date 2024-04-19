@@ -196,7 +196,7 @@ def get_ddp_module(module, find_unused_parameters=False, **kwargs):
         return module
     device = torch.cuda.current_device()
     module = DDPPassthrough(module, device_ids=[device], output_device=device,
-                            find_unused_parameters=find_unused_parameters, **kwargs)
+                            find_unused_parameters=True, **kwargs)
     return module
 
 

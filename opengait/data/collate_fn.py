@@ -35,6 +35,7 @@ class CollateFn(object):
 
     def __call__(self, batch):
         batch_size = len(batch)
+        # print("asdasdasd  ",len(batch[0][0]),len(batch[0][0][1]),len(batch[0][0][1][0]),len(batch[0][0][1][0][0]))
         # currently, the functionality of feature_num is not fully supported yet, it refers to 1 now. We are supposed to make our framework support multiple source of input data, such as silhouette, or skeleton.
         feature_num = len(batch[0][0])
         seqs_batch, labs_batch, typs_batch, vies_batch = [], [], [], []
@@ -95,10 +96,12 @@ class CollateFn(object):
         # b: batch_size
         # p: batch_size_per_gpu
         # g: gpus_num
+        # 这里多模态数据是放到一起的 比如[【sil_#1,ske_#1】,【sil_#2，ske_#2】,【sil_#3，ske_#3】]
         fras_batch = [sample_frames(seqs) for seqs in seqs_batch]  # [b, f]
         batch = [fras_batch, labs_batch, typs_batch, vies_batch, None]
 
         if self.sampler == "fixed":
+            # 两个模态的数据进行分割开，比如[[序列1_sil，序列2_sil],[序列1_ske，序列2_ske，]]
             fras_batch = [[np.asarray(fras_batch[i][j]) for i in range(batch_size)]
                           for j in range(feature_num)]  # [f, b]
         else:

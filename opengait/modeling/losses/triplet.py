@@ -12,6 +12,8 @@ class TripletLoss(BaseLoss):
     @gather_and_scale_wrapper
     def forward(self, embeddings, labels):
         # embeddings: [n, c, p], label: [n]
+        # print("(((((",embeddings.shape,len(labels))
+        # torch.Size([256, 128, 1]) 256
         embeddings = embeddings.permute(
             2, 0, 1).contiguous().float()  # [n, c, p] -> [p, n, c]
 
@@ -59,10 +61,19 @@ class TripletLoss(BaseLoss):
             row_labels: tensor with size [n_r]
             clo_label : tensor with size [n_c]
         """
+        # print("&&&&&&&&&&",row_labels)
+        # print("###########",clo_label)
         matches = (row_labels.unsqueeze(1) ==
                    clo_label.unsqueeze(0)).bool()  # [n_r, n_c]
         diffenc = torch.logical_not(matches)  # [n_r, n_c]
         p, n, _ = dist.size()
+        # print("&&&&&&&&&&&&&",torch.sum(matches))
+        # print("*********matches",matches.size(),diffenc.size())
+        # print("&&&&&&&&&&&&&&",dist.size(),dist[:, matches].size())
+        # &&&&&&&&&&&&&& torch.Size([1, 256, 256]) torch.Size([1, 3328])
+        # dist_flattened = dist.view(-1)
+        # ap_dist = dist_flattened.masked_select(matches.view(-1)).view(p, n, -1, 1)
         ap_dist = dist[:, matches].view(p, n, -1, 1)
+        # an_dist = dist_flattened.masked_select(diffenc.view(-1)).view(p, n, 1, -1)
         an_dist = dist[:, diffenc].view(p, n, 1, -1)
         return ap_dist, an_dist

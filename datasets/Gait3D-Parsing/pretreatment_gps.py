@@ -13,7 +13,56 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
+ORG_KEYPOINTS = {
+    'nose'          :0,
+    'neck'      :1,
+    'right_shoulder'     :2,
+    'right_elbow'      :3,
+    'right_wrist'     :4,
+    'left_shoulder' :5,
+    'left_elbow':6,
+    'left_wrist'    :7,
+    'MidHip'   :8,
+    'right_hip'    :9,
+    'right_knee'   :10,
+    'right_ankle'      :11,
+    'left_hip'     :12,
+    'left_knee'     :13,
+    'left_ankle'    :14,
+    'REye'    :15,
+    'LEye'   :16,
+    'REar'   :17,
+    'LEar'   :18,
+    'LBigToe'   :19,
+    'LSmallToe'   :20,
+    'LHeel'   :21,
+    'RBigToe'   :22,
+    'RSmallToe'   :23,
+    'RHeel'   :24,
 
+}
+
+NEW_KEYPOINTS = {
+    0: 'right_shoulder',
+    1: 'right_elbow',
+    2: 'right_knee',
+    3: 'right_hip',
+    4: 'left_elbow',
+    5: 'left_knee',
+    6: 'left_shoulder',
+    7: 'right_wrist',
+    8: 'right_ankle',
+    9: 'left_hip',
+    10: 'left_wrist',
+    11: 'left_ankle',
+}
+
+def get_index_mapping():
+    index_mapping = {}
+    for _key in NEW_KEYPOINTS.keys():
+        map_index = ORG_KEYPOINTS[NEW_KEYPOINTS[_key]]
+        index_mapping[_key] = map_index
+    return index_mapping
 def imgs2pickle(img_groups: Tuple, output_path: Path, img_size: int = 64, verbose: bool = False, parsing: bool = False, dataset='CASIAB') -> None:
     """Reads a group of images and saves the data in pickle format.
 
@@ -22,10 +71,12 @@ def imgs2pickle(img_groups: Tuple, output_path: Path, img_size: int = 64, verbos
         output_path (Path): Output path.
         img_size (int, optional): Image resizing size. Defaults to 64.
         verbose (bool, optional): Display debug info. Defaults to False.
-    """    
+    """
+    index_mapping = get_index_mapping()
     sinfo = img_groups[0]
     img_paths = img_groups[1]
     to_pickle = []
+    merge_seq = []
     for img_file in sorted(img_paths):
         if verbose:
             logging.debug(f'Reading sid {sinfo[0]}, seq {sinfo[1]}, view {sinfo[2]} from {img_file}')
@@ -45,7 +96,6 @@ def imgs2pickle(img_groups: Tuple, output_path: Path, img_size: int = 64, verbos
                 logging.debug(f'Image sum: {img_sil.sum()}')
             logging.warning(f'{img_file} has no data.')
             continue
-
         # Get the upper and lower points
         y_sum = img_sil.sum(axis=1)
         y_top = (y_sum != 0).argmax(axis=0)
@@ -76,7 +126,34 @@ def imgs2pickle(img_groups: Tuple, output_path: Path, img_size: int = 64, verbos
         if not x_center:
             logging.warning(f'{img_file} has no center.')
             continue
+        # 这里同样的对smpl数据相关帧进行加载，根据后缀名进行匹配
+        # 分割路径，获取目录和文件名（包括后缀）
+        file_dir, file_name_with_extension = os.path.split(img_file)
 
+        # 进一步分割文件名，获取文件名和原始后缀
+        file_name, original_extension = os.path.splitext(file_name_with_extension)
+
+        # 新的文件扩展名
+        new_extension = '.npz'
+
+        # 构建新的文件名和新的文件路径
+        new_file_name = file_name + new_extension
+        smpl_path = os.path.join(r"E:\BAIDU\3d_smpl\3D_SMPLs", *sinfo, new_file_name)
+        try:
+            with open(smpl_path, 'rb') as f:
+                data = np.load(smpl_path, allow_pickle=True)['results'][()]
+                # print("shape",data.shape)
+                # 获取3d关键点
+                data = data[0]["j3d_op25"]
+                # print(data)
+                # print(data[0]["j3d_op25"])
+                # 这里对数据进行重写映射
+                mapped_keypoints = np.zeros((12, 3))
+                for i in range(mapped_keypoints.shape[0]):
+                    mapped_keypoints[i] = data[index_mapping[i]]
+                merge_seq.append(mapped_keypoints)
+        except Exception as e:
+            print("Error: ", e)
         # Get the left and right points
         half_width = img_size // 2
         left = x_center - half_width
@@ -99,6 +176,17 @@ def imgs2pickle(img_groups: Tuple, output_path: Path, img_size: int = 64, verbos
         if verbose:
             logging.debug(f'Saving {pkl_path}...')
         pickle.dump(to_pickle, open(pkl_path, 'wb'))   
+        logging.info(f'Saved {len(to_pickle)} valid frames to {pkl_path}.')
+    if merge_seq:
+        to_pickle = np.asarray(merge_seq)
+        dst_path = os.path.join("E:\BAIDU\Gait3D-Parsing\skeleton_400_pkl", *sinfo)
+        # print(img_paths[0].as_posix().split('/'),img_paths[0].as_posix().split('/')[-5])
+        # dst_path = os.path.join(output_path, img_paths[0].as_posix().split('/')[-5], *sinfo) if dataset == 'GREW' else dst
+        os.makedirs(dst_path, exist_ok=True)
+        pkl_path = os.path.join(dst_path, f'{sinfo[2]}.pkl')
+        if verbose:
+            logging.debug(f'Saving {pkl_path}...')
+        pickle.dump(to_pickle, open(pkl_path, 'wb'))
         logging.info(f'Saved {len(to_pickle)} valid frames to {pkl_path}.')
 
 

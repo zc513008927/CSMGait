@@ -145,7 +145,7 @@ class BaseModel(MetaModel, nn.Module):
         self.build_network(cfgs['model_cfg'])
         self.init_parameters()
         self.trainer_trfs = get_transform(cfgs['trainer_cfg']['transform'])
-
+        print(cfgs['trainer_cfg']['transform'])
         self.msg_mgr.log_info(cfgs['data_cfg'])
         if training:
             self.train_loader = self.get_loader(
@@ -302,12 +302,14 @@ class BaseModel(MetaModel, nn.Module):
             tuple: training data including inputs, labels, and some meta data.
         """
         seqs_batch, labs_batch, typs_batch, vies_batch, seqL_batch = inputs
+        # print("***********seqs_batch",len(seqs_batch[0]),len(seqs_batch[0][0]),len(seqs_batch[0][0][0]),len(seqs_batch[0][0][0][0]))
+        # ***********seqs_batch 128 30 12 3
         seq_trfs = self.trainer_trfs if self.training else self.evaluator_trfs
         if len(seqs_batch) != len(seq_trfs):
             raise ValueError(
                 "The number of types of input data and transform should be same. But got {} and {}".format(len(seqs_batch), len(seq_trfs)))
         requires_grad = bool(self.training)
-        seqs = [np2var(np.asarray([trf(fra) for fra in seq]), requires_grad=requires_grad).float()
+        seqs = [np2var(np.asarray([trf(fra) for fra in seq], dtype=np.float32), requires_grad=requires_grad).float()
                 for trf, seq in zip(seq_trfs, seqs_batch)]
 
         typs = typs_batch
@@ -403,6 +405,8 @@ class BaseModel(MetaModel, nn.Module):
     def run_train(model):
         """Accept the instance object(model) here, and then run the train loop."""
         for inputs in model.train_loader:
+            iptss, labs, _, _, seqL = inputs
+            # print("*********",len(iptss[1]),len(iptss[1][0]),len(iptss[1][0][0]),len(iptss[1][0][0][0]))
             ipts = model.inputs_pretreament(inputs)
             with autocast(enabled=model.engine_cfg['enable_float16']):
                 retval = model(ipts)

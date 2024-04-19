@@ -8,6 +8,8 @@ import torch.utils.data as tordata
 class TripletSampler(tordata.sampler.Sampler):
     def __init__(self, dataset, batch_size, batch_shuffle=False):
         self.dataset = dataset
+        print("dataset:",dataset.label_set)
+        # print("dataset:",dataset.label_set)
         self.batch_size = batch_size
         if len(self.batch_size) != 2:
             raise ValueError(
@@ -54,6 +56,7 @@ def sync_random_sample_list(obj_list, k, common_choice=False):
         idx = random.choices(range(len(obj_list)), k=k) 
         idx = torch.tensor(idx)
     if len(obj_list) < k:
+        # print("**********",len(obj_list),k)
         idx = random.choices(range(len(obj_list)), k=k)
         idx = torch.tensor(idx)
     else:

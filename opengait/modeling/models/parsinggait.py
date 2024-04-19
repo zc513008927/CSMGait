@@ -240,14 +240,19 @@ class ParsingGait(BaseModel):
         else:
             raise ValueError("You should choose fine/coarse graph, or combine both of them.")
         outs_ps = outs_ps.transpose(1, 2).contiguous()  # [n, c, ps]
-
+        print("outs_ps", outs_ps.size())
         # Temporal Pooling, TP
         outs = self.TP(outs, seqL, options={"dim": 2})[0]  # [n, c, h, w]
         # Horizontal Pooling Matching, HPM
+        print("outs", outs_ps.size())
         feat = self.HPP(outs)  # [n, c, p]
-
+        print("^^^^^",feat.size())
         feat = torch.cat([feat, outs_ps], dim=-1)  # [n, c, p+ps]
-
+        print("^^^^^", feat.size())
+        # outs_ps torch.Size([32, 512, 5])
+        # outs torch.Size([32, 512, 5])
+        # ^^^^^ torch.Size([32, 512, 16])
+        # ^^^^^ torch.Size([32, 512, 21])
         embed_1 = self.FCs(feat)  # [n, c, p+ps]
         embed_2, logits = self.BNNecks(embed_1)  # [n, c, p+ps]
         embed = embed_1
