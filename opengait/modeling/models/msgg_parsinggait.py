@@ -76,11 +76,11 @@ class Msgg_ParsingGait(BaseModel):
         self.graph = SpatialGraph(**model_cfg['graph_cfg'])
         A_lowSemantic = torch.tensor(self.graph.get_adjacency(semantic_level=0), dtype=torch.float32, requires_grad=False)
         A_mediumSemantic =  torch.tensor(self.graph.get_adjacency(semantic_level=1), dtype=torch.float32, requires_grad=False)
-        A_highSemantic = torch.tensor(self.graph.get_adjacency(semantic_level=2), dtype=torch.float32, requires_grad=False)
+        # A_highSemantic = torch.tensor(self.graph.get_adjacency(semantic_level=2), dtype=torch.float32, requires_grad=False)
 
         self.register_buffer('A_lowSemantic', A_lowSemantic)
         self.register_buffer('A_mediumSemantic', A_mediumSemantic)
-        self.register_buffer('A_highSemantic', A_highSemantic)
+        # self.register_buffer('A_highSemantic', A_highSemantic)
 
         # build networks
         spatial_kernel_size = self.graph.num_A
@@ -94,15 +94,15 @@ class Msgg_ParsingGait(BaseModel):
             if i == 0:
                 self.st_gcn_networks_lowSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1, residual=False))
                 self.st_gcn_networks_mediumSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1, residual=False))
-                self.st_gcn_networks_highSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1, residual=False))
+                # self.st_gcn_networks_highSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1, residual=False))
             else:
                 self.st_gcn_networks_lowSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1))
                 self.st_gcn_networks_mediumSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1))
-                self.st_gcn_networks_highSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1))
+                # self.st_gcn_networks_highSemantic.append(st_gcn_block(in_c[i], in_c[i+1], kernel_size, 1))
 
             self.st_gcn_networks_lowSemantic.append(st_gcn_block(in_c[i+1], in_c[i+1], kernel_size, 1))
             self.st_gcn_networks_mediumSemantic.append(st_gcn_block(in_c[i+1], in_c[i+1], kernel_size, 1))
-            self.st_gcn_networks_highSemantic.append(st_gcn_block(in_c[i+1], in_c[i+1], kernel_size, 1))
+            # self.st_gcn_networks_highSemantic.append(st_gcn_block(in_c[i+1], in_c[i+1], kernel_size, 1))
         #     这里设置成parameter认为是一个可以更新的权重参数，并且采用torch.ones方式其实是使用了类似注意力的机制
         self.edge_importance_lowSemantic = nn.ParameterList([
             nn.Parameter(torch.ones(self.A_lowSemantic.size()))
@@ -112,9 +112,9 @@ class Msgg_ParsingGait(BaseModel):
             nn.Parameter(torch.ones(self.A_mediumSemantic.size()))
             for i in self.st_gcn_networks_mediumSemantic])
 
-        self.edge_importance_highSemantic = nn.ParameterList([
-            nn.Parameter(torch.ones(self.A_highSemantic.size()))
-            for i in self.st_gcn_networks_highSemantic])
+        # self.edge_importance_highSemantic = nn.ParameterList([
+        #     nn.Parameter(torch.ones(self.A_highSemantic.size()))
+        #     for i in self.st_gcn_networks_highSemantic])
 
         self.fc = nn.Linear(in_c[-1], out_c)
         self.bn_neck = nn.BatchNorm1d(out_c)
@@ -307,20 +307,19 @@ class Msgg_ParsingGait(BaseModel):
         # print("****************",x.size())
         y = self.semantic_pooling(x)
         # print("((((((((((((((",y.size())
-        z = self.semantic_pooling(y)
+        # z = self.semantic_pooling(y)
         for gcn_lowSemantic, importance_lowSemantic, gcn_mediumSemantic, importance_mediumSemantic, gcn_highSemantic, importance_highSemantic in zip(
                 self.st_gcn_networks_lowSemantic, self.edge_importance_lowSemantic, self.st_gcn_networks_mediumSemantic,
-                self.edge_importance_mediumSemantic, self.st_gcn_networks_highSemantic,
-                self.edge_importance_highSemantic):
+                self.edge_importance_mediumSemantic):
             x, _ = gcn_lowSemantic(x, self.A_lowSemantic * importance_lowSemantic)
             y, _ = gcn_mediumSemantic(y, self.A_mediumSemantic * importance_mediumSemantic)
-            z, _ = gcn_highSemantic(z, self.A_highSemantic * importance_highSemantic)
+            # z, _ = gcn_highSemantic(z, self.A_highSemantic * importance_highSemantic)
 
             # Cross-scale Message Passing
             x_sp = self.semantic_pooling(x)
             y = torch.add(y, x_sp)
             y_sp = self.semantic_pooling(y)
-            z = torch.add(z, y_sp)
+            # z = torch.add(z, y_sp)
         # print("$$$$$$$$$$$$$",y.size())
         # self.y_sp_output = y
         # global pooling for each layer
@@ -332,19 +331,19 @@ class Msgg_ParsingGait(BaseModel):
         N, C, T, V = y_sp.size()
         y_sp = y_sp.view(N, C, T * V).contiguous()
         # self.y_sp=y_sp
-        z = F.avg_pool2d(z, z.size()[2:])
-        N, C, T, V = z.size()
-        z = z.permute(0, 2, 3, 1).contiguous()
-        z = z.view(N, T * V, C)
+        # z = F.avg_pool2d(z, z.size()[2:])
+        # N, C, T, V = z.size()
+        # z = z.permute(0, 2, 3, 1).contiguous()
+        # z = z.view(N, T * V, C)
 
-        z_fc = self.fc(z.view(N, -1))
+        # z_fc = self.fc(z.view(N, -1))
         # bn_z_fc = self.bn_neck(z_fc)
         # z_cls_score = self.encoder_cls(bn_z_fc)
 
-        z_fc = z_fc.unsqueeze(-1).contiguous()  # [n, c, p]
+        # z_fc = z_fc.unsqueeze(-1).contiguous()  # [n, c, p]
         # self.z_fc=z_fc
         # z_cls_score = z_cls_score.unsqueeze(-1).contiguous()  # [n, c, p]
-        return y, x_sp, y_sp, z_fc
+        return y, x_sp, y_sp
         # retval = {
         #     'training_feat': {
         #         'triplet_joints': {'embeddings': x_sp, 'labels': labs},
@@ -397,7 +396,7 @@ class Msgg_ParsingGait(BaseModel):
         # Horizontal Pooling Matching, HPM
         # feat = self.HPP(outs)  # [n, c, p ]
         # 调用msgg模块
-        y, x_sp, y_sp, z_fc=self.forward_msgg(inputs)
+        y, x_sp, y_sp=self.forward_msgg(inputs)
         # Concatenate the features
         # y_sp(N, C, T, V)
         # outs_ps [n, t, v, c]
@@ -472,7 +471,7 @@ class Msgg_ParsingGait(BaseModel):
             'training_feat': {
                 'triplet_joints': {'embeddings': x_sp, 'labels': labs},
                 'triplet_limbs': {'embeddings': y_sp, 'labels': labs},
-                'triplet_bodyparts': {'embeddings': z_fc, 'labels': labs},
+                # 'triplet_bodyparts': {'embeddings': z_fc, 'labels': labs},
                 'triplet': {'embeddings': embed_1, 'labels': labs},
                 'softmax': {'logits': logits, 'labels': labs}
             },

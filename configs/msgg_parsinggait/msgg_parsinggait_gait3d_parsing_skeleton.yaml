@@ -26,16 +26,16 @@ evaluator_cfg:
       prob: modified
 
 loss_cfg:
-  - loss_term_weight: 1.0
+  - loss_term_weight: 0.3
     margin: 0.2
     type: TripletLoss
     log_prefix: triplet
-  - loss_term_weight: 1.0
+  - loss_term_weight: 0.3
     scale: 16
     type: CrossEntropyLoss
     log_prefix: softmax
     log_accuracy: true
-  - loss_term_weight: 0.3
+  - loss_term_weight: 0.2
     margin: 0.2
     type: TripletLoss
     log_prefix: triplet_joints
@@ -43,10 +43,10 @@ loss_cfg:
     margin: 0.2
     type: TripletLoss
     log_prefix: triplet_limbs
-  - loss_term_weight: 0.1
-    margin: 0.2
-    type: TripletLoss
-    log_prefix: triplet_bodyparts
+#  - loss_term_weight: 0.1
+#    margin: 0.2
+#    type: TripletLoss
+#    log_prefix: triplet_bodyparts
 
 model_cfg:
   model: Msgg_ParsingGait
