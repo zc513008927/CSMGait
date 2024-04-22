@@ -77,6 +77,7 @@ class PackSequenceWrapper(nn.Module):
 class BasicConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding, **kwargs):
         super(BasicConv2d, self).__init__()
+        # print(" inchannles",in_channels,"outchannerls:",out_channels,kernel_size)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size,
                               stride=stride, padding=padding, bias=False, **kwargs)
 

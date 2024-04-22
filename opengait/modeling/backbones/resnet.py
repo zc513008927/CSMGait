@@ -23,6 +23,7 @@ class ResNet9(ResNet):
         ############
         self.inplanes = channels[0]
         self.bn1 = nn.BatchNorm2d(self.inplanes)
+        # print("in***",in_channel,self.inplanes)
 
         self.conv1 = BasicConv2d(in_channel, self.inplanes, 3, 1, 1)
 
@@ -44,15 +45,20 @@ class ResNet9(ResNet):
         return layer
 
     def forward(self, x):
+        # print(x.shape)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         if self.maxpool_flag:
             x = self.maxpool(x)
-
+        # print(x.shape)
         x = self.layer1(x)
+        # print(x.shape)
         x = self.layer2(x)
+        # print(x.shape)
         x = self.layer3(x)
+        # print(x.shape)
         x = self.layer4(x)
+        # print(x.shape)
         return x
 

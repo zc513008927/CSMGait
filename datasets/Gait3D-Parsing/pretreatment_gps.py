@@ -179,7 +179,7 @@ def imgs2pickle(img_groups: Tuple, output_path: Path, img_size: int = 64, verbos
         logging.info(f'Saved {len(to_pickle)} valid frames to {pkl_path}.')
     if merge_seq:
         to_pickle = np.asarray(merge_seq)
-        dst_path = os.path.join("E:\BAIDU\Gait3D-Parsing\skeleton_400_pkl", *sinfo)
+        dst_path = os.path.join("E:\BAIDU\Gait3D-Parsing\skeleton_4000", *sinfo)
         # print(img_paths[0].as_posix().split('/'),img_paths[0].as_posix().split('/')[-5])
         # dst_path = os.path.join(output_path, img_paths[0].as_posix().split('/')[-5], *sinfo) if dataset == 'GREW' else dst
         os.makedirs(dst_path, exist_ok=True)

@@ -4,8 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from ..base_model import BaseModel
-from ..modules import SetBlockWrapper, HorizontalPoolingPyramid, PackSequenceWrapper, SeparateFCs, SeparateBNNecks
+from ..modules import SetBlockWrapper, HorizontalPoolingPyramid, PackSequenceWrapper, SeparateFCs, SeparateBNNecks,BasicConv2d
 from ..backbones.gcn import GCN
+
 def L_Matrix(adj_npy, adj_size):
     D = np.zeros((adj_size, adj_size))
     for i in range(adj_size):
@@ -121,11 +122,14 @@ class Msgg_ParsingGait(BaseModel):
     def build_network(self, model_cfg):
         self.Backbone = self.get_backbone(model_cfg['backbone_cfg'])
         self.Backbone = SetBlockWrapper(self.Backbone)
+        # self.Backbone_new = self.get_backbone(model_cfg['backbone_cfg_new'])
+        # self.Backbone_new = SetBlockWrapper(self.Backbone_new)
         self.FCs = SeparateFCs(**model_cfg['SeparateFCs'])
         self.BNNecks = SeparateBNNecks(**model_cfg['SeparateBNNecks'])
         self.TP = PackSequenceWrapper(torch.max)
+        self.TP_new = PackSequenceWrapper(torch.max)
         self.HPP = HorizontalPoolingPyramid(bin_num=model_cfg['bin_num'])
-
+        self.conv2 = BasicConv2d(model_cfg['CNN']['in_channels'], model_cfg['CNN']['out_channels'], 3, 1, 1)
         nfeat = model_cfg['GCN']['in_channels']
         nfeat_new= model_cfg['SeparateFCs']['in_channels']
         gcn_cfg = model_cfg['gcn_cfg']
@@ -363,6 +367,7 @@ class Msgg_ParsingGait(BaseModel):
             pars = pars.unsqueeze(1)
 
         del ipts
+        # print("pars:",pars.size())
         outs = self.Backbone(pars)  # [n, c, s, h, w]
 
         outs_n, outs_c, outs_s, outs_h, outs_w = outs.size()
@@ -421,6 +426,26 @@ class Msgg_ParsingGait(BaseModel):
         Y[:, [1, 2, 3, 4], :] = y_sp_output[:,[4, 1, 5, 2], :]
         Y[:, 0, :] = avg_node
         feat_msgg_parsinggait = torch.cat([Y, outs_ps], dim=-1)  # [n*s,v-1,c+C]
+        # 这里把全局的shape信息融合进去
+        # 这里对outs再卷积一次，保证其通道数是640  ，
+        # print("******************1", outs.size())torch.Size([32, 512, 30, 16, 11])
+        n1,c1,s1,h1,w1=outs.size()
+        outs=outs.permute(0, 2, 1, 3,4).contiguous()
+        # print("******************2", outs.size())  torch.Size([32, 30, 512, 16, 11])
+        outs=outs.view(n1*s1,c1,h1,w1)
+        # print("******************3", outs.size())torch.Size([960, 512, 16, 11])
+        outs = self.conv2(outs)  # [n, c, s, h, w]
+        # print("******************4",outs.size())  #torch.Size([960, 640, 16, 11])
+        # 这里进行时序池化操作
+        n1, c1, h1, w1 = outs.size()
+        outs = outs.view(n1//s1,s1 , c1, h1, w1)
+        outs=outs.permute(0,2,1,3,4)
+        # print("***************5",outs.size())
+        outs = self.TP(outs, seqL, options={"dim": 2})[0]  # [n, c, h, w] [32,640,16,11]
+        # Horizontal Pooling Matching, HPM
+        # print("outs", outs_ps.size())
+        feat = self.HPP(outs)  # [n, c, p]  ^^^^^ torch.Size([32, 512, 16])
+        # print("^^^^^^^^^^",feat.size())
         # 进行GCN操作
         n_s,v,c = feat_msgg_parsinggait.size()
         if is_cuda:
@@ -430,12 +455,15 @@ class Msgg_ParsingGait(BaseModel):
         output_ps = self.gcn_coarse_new(feat_msgg_parsinggait, adj)  # [n*s, 5, c+C]
         output_ps = output_ps.view(outs_n, n_s // outs_n, v, -1)  # [n, s, ps, c]
         # 进行时间池化
-        output_ps = self.TP(output_ps, seqL, dim=1, options={"dim": 1})[0]  # [n, ps, c]
+        output_ps = self.TP_new(output_ps, seqL, dim=1, options={"dim": 1})[0]  # [n, ps, c]
         # 【32,5,640】
         output_ps=output_ps.transpose(1, 2).contiguous()   # [n, c, ps]
+        # 这里在进行cat操作
+        feat = torch.cat([output_ps, feat], dim=-1)  # [n,c+C,v+V]
+        # print("  ***********feat",feat.size())
         # feat = torch.cat([feat, outs_ps], dim=-1)  # [n, c, p+ps]
         # embed_1 = self.FCs(feat)  # [n, c, p+ps]
-        embed_1 = self.FCs(output_ps)  # [n, c+C, p]
+        embed_1 = self.FCs(feat)  # [n, c+C, p]
         embed_2, logits = self.BNNecks(embed_1)  # [n, c+C, ps]
         embed = embed_1
 

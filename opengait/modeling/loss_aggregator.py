@@ -82,5 +82,5 @@ class LossAggregator(nn.Module):
                 else:
                     raise ValueError(
                         "Error type for -Trainng-Feat-, supported: A feature dict or loss tensor.")
-
+        loss_info['scalar/%s/%s' % ("loss_sum", "loss_sum")] = loss_sum
         return loss_sum, loss_info

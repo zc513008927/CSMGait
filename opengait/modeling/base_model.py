@@ -413,6 +413,7 @@ class BaseModel(MetaModel, nn.Module):
                 training_feat, visual_summary = retval['training_feat'], retval['visual_summary']
                 del retval
             loss_sum, loss_info = model.loss_aggregator(training_feat)
+            # print("*****************loss_sum",loss_sum)
             ok = model.train_step(loss_sum)
             if not ok:
                 continue
